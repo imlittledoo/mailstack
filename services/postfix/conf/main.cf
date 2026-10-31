@@ -1,0 +1,102 @@
+# MailStack Postfix configuration.
+# Host-specific values (myhostname, message_size_limit, relayhost) are set by the entrypoint.
+
+compatibility_level = 3.6
+myhostname = localhost.localdomain
+myorigin = $myhostname
+mydestination = localhost
+mynetworks = 127.0.0.0/8 [::1]/128
+inet_interfaces = all
+inet_protocols = ipv4
+smtpd_banner = $myhostname ESMTP
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+maillog_file = /dev/stdout
+recipient_delimiter = +
+message_size_limit = 52428800
+mailbox_size_limit = 0
+delay_warning_time = 4h
+maximal_queue_lifetime = 5d
+bounce_queue_lifetime = 5d
+
+# No local delivery: every domain is virtual and lives in MariaDB.
+alias_maps =
+alias_database =
+local_recipient_maps =
+local_transport = error:local delivery is disabled
+
+virtual_mailbox_domains = proxy:mysql:/etc/postfix/sql/virtual_domains.cf
+virtual_mailbox_maps = proxy:mysql:/etc/postfix/sql/virtual_mailboxes.cf
+# Order matters: mailbox self-mapping first so catch-all aliases never shadow real mailboxes.
+virtual_alias_maps =
+  proxy:mysql:/etc/postfix/sql/virtual_alias_self.cf,
+  proxy:mysql:/etc/postfix/sql/virtual_aliases.cf,
+  proxy:mysql:/etc/postfix/sql/alias_domain_mailboxes.cf,
+  proxy:mysql:/etc/postfix/sql/alias_domain_aliases.cf
+virtual_transport = lmtp:inet:dovecot:24
+
+# Authentication is delegated to Dovecot.
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = inet:dovecot:12345
+smtpd_sasl_auth_enable = no
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_authenticated_header = no
+smtpd_sender_login_maps = proxy:mysql:/etc/postfix/sql/sender_login.cf
+
+# TLS (server)
+smtpd_tls_cert_file = /etc/ssl/mail/cert.pem
+smtpd_tls_key_file = /etc/ssl/mail/key.pem
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_loglevel = 1
+smtpd_tls_received_header = yes
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
+smtpd_tls_protocols = !SSLv2, !SSLv3
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+smtpd_tls_mandatory_ciphers = high
+tls_preempt_cipherlist = no
+
+# TLS (client)
+smtp_tls_security_level = may
+smtp_tls_loglevel = 1
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+
+# SMTP hygiene
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+strict_rfc821_envelopes = yes
+smtpd_delay_reject = yes
+smtpd_reject_unlisted_recipient = yes
+smtpd_client_connection_rate_limit = 60
+smtpd_error_sleep_time = 1s
+smtpd_soft_error_limit = 10
+smtpd_hard_error_limit = 20
+
+smtpd_helo_restrictions =
+  permit_mynetworks,
+  permit_sasl_authenticated,
+  reject_invalid_helo_hostname,
+  reject_non_fqdn_helo_hostname
+smtpd_sender_restrictions =
+  permit_mynetworks,
+  reject_non_fqdn_sender,
+  reject_unknown_sender_domain
+smtpd_relay_restrictions =
+  permit_mynetworks,
+  permit_sasl_authenticated,
+  reject_unauth_destination
+smtpd_recipient_restrictions =
+  reject_non_fqdn_recipient,
+  reject_unknown_recipient_domain,
+  reject_unlisted_recipient,
+  check_policy_service inet:dovecot:12340
+smtpd_data_restrictions = reject_unauth_pipelining
+
+# Rspamd (spam filtering + DKIM signing) via milter.
+smtpd_milters = inet:rspamd:11332
+non_smtpd_milters = $smtpd_milters
+milter_protocol = 6
+milter_default_action = accept
+milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}

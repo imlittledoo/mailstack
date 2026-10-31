@@ -1,0 +1,9 @@
+#!/bin/sh
+# rspamd-learn spam|ham  - message on stdin. Called by IMAPSieve as user vmail.
+case "$1" in
+  spam|ham) ;;
+  *) exit 1 ;;
+esac
+exec curl -sS --max-time 30 -o /dev/null \
+  -H "Password: $(cat /etc/dovecot/rspamd-password)" \
+  --data-binary @- "http://rspamd:11334/learn$1"
