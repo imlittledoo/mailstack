@@ -60,10 +60,14 @@ A complete, self-hosted mail server stack in Docker: an alternative to mailcow, 
 ## Quick start
 
 ```bash
-git clone <this repo> mailstack && cd mailstack
-./mailstack.sh init mail.example.com you@example.com   # writes .env with random secrets and prints the admin password
-./mailstack.sh up
+git clone https://github.com/imlittledoo/mailstack && cd mailstack
+./generate_config.sh          # asks for your mail hostname, writes .env with random secrets
+docker compose up -d          # builds and starts everything
 ```
+
+`generate_config.sh` prints the admin password. If ports 80/443 are already used by another web server (Pterodactyl, Apache, ...), it offers to run MailStack behind it and writes a ready-made `host-nginx.conf` for you.
+
+Update later with `./update.sh` (pulls the latest code, rebuilds, restarts; database upgrades are automatic).
 
 Then:
 
@@ -97,7 +101,7 @@ Run `./mailstack.sh up` again after changing `.env`.
 ./mailstack.sh queue | flush            # inspect / retry the mail queue
 ./mailstack.sh backup                   # DB + mail + DKIM + certs -> ./backups/<timestamp>
 ./mailstack.sh restore backups/<ts>     # restore a backup
-./mailstack.sh update                   # rebuild with fresh base images
+./update.sh                             # git pull + rebuild with fresh base images
 ./mailstack.sh reset-admin admin        # forgot the admin password
 ./mailstack.sh purge-orphans [--delete] # remove mail of deleted mailboxes
 ./mailstack.sh doveadm quota get -u jane@example.com

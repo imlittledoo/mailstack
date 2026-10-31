@@ -8,6 +8,7 @@ DC=(docker compose)
 
 die() { echo "error: $*" >&2; exit 1; }
 gen() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-32}" || true; }
+port_busy() { ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"; }
 need_env() { [ -f .env ] || die ".env not found - run ./mailstack.sh init first"; }
 env_get() { grep -E "^$1=" .env | tail -n1 | cut -d= -f2-; }
 
@@ -42,6 +43,32 @@ cmd_init() {
     -e "s|^ACME_EMAIL=.*|ACME_EMAIL=$email|" \
     .env.example > .env
   chmod 600 .env
+
+  # Another web server on 80/443 (Pterodactyl, Apache, ...)? Run behind it instead.
+  local proxied=0 web_note=""
+  if port_busy 80 || port_busy 443; then
+    echo "Ports 80/443 are already in use on this machine (another web server)."
+    local answer=Y
+    if [ -t 0 ]; then read -rp "Run MailStack's web interface behind it on 127.0.0.1:8088/8448? [Y/n] " answer; fi
+    if [[ ! "${answer:-Y}" =~ ^[Nn] ]]; then
+      proxied=1
+      sed -i -e 's|^HTTP_PORT=.*|HTTP_PORT=127.0.0.1:8088|' -e 's|^HTTPS_PORT=.*|HTTPS_PORT=127.0.0.1:8448|' .env
+      sed "s/mail\.example\.com/$host/g" docs/host-nginx.conf.example > host-nginx.conf
+      web_note="
+Reverse-proxy mode: the web ports are bound to 127.0.0.1. Install the generated
+nginx config, then reload nginx (after './mailstack.sh up' has run once):
+
+  cp host-nginx.conf /etc/nginx/sites-available/mailstack.conf
+  ln -s /etc/nginx/sites-available/mailstack.conf /etc/nginx/sites-enabled/
+  nginx -t && systemctl reload nginx
+  echo '0 4 * * 1 root systemctl reload nginx' > /etc/cron.d/reload-nginx-mailstack
+"
+    fi
+  fi
+  local busy=()
+  for p in 25 465 587 993 995 143 110 4190; do port_busy "$p" && busy+=("$p"); done
+  [ ${#busy[@]} -gt 0 ] && echo "WARNING: mail ports already in use: ${busy[*]} - stop whatever uses them (or change them in .env)."
+
   cat <<EOF
 Created .env for $host
 
@@ -49,9 +76,10 @@ Created .env for $host
   Username:     admin
   Password:     $admin_pw
   Rspamd UI:    https://$host/rspamd/  (password: RSPAMD_PASSWORD in .env)
-
+$web_note
 Before starting, point an A record for $host at this server and open ports
-25 465 587 993 995 143 110 4190 80 443. Then run: ./mailstack.sh up
+25 465 587 993 (and 995 143 110 4190 if you want them)$([ "$proxied" = 0 ] && echo " plus 80 and 443").
+Then run: docker compose up -d   (or ./mailstack.sh up)
 EOF
 }
 
